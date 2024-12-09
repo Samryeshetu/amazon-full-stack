@@ -8,20 +8,11 @@ import CurrencyFormat from "../../Components/CurrencyFormat/CurrencyFormat";
 import { axiosInstance } from "../../Api/axios";
 import { ClipLoader } from "react-spinners";
 import { useNavigate } from "react-router-dom";
+import { db } from "../../Utility/firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 function Payment() {
   const [{ user, basket }, dispatch] = useContext(DataContext);
-  console.log("User:", user);
-
-  const totalItem = basket?.reduce((amount, item) => {
-    return item.amount + amount;
-  }, 0);
-
-  const total =
-    basket?.reduce((amount, item) => {
-      return item.price * item.amount + amount;
-    }, 0) || 0; // Ensure total is at least 0
-
   const [cardError, setCardError] = useState(null);
   const [processing, setProcessing] = useState(false);
 
@@ -29,73 +20,98 @@ function Payment() {
   const elements = useElements();
   const navigate = useNavigate();
 
+  const totalItem = basket?.reduce((amount, item) => item.amount + amount, 0);
+
+  const total =
+    basket?.reduce((amount, item) => item.price * item.amount + amount, 0) || 0;
+
   const handleChange = (e) => {
-    console.log("Card Element Change Event:", e);
     e?.error?.message ? setCardError(e?.error?.message) : setCardError("");
   };
 
-const handlePayment = async (e) => {
-  e.preventDefault();
+  const handlePayment = async (e) => {
+    e.preventDefault();
 
-  try {
-    setProcessing(true);
-    setCardError(null);
+    try {
+      setProcessing(true);
+      setCardError(null);
 
-    if (!stripe || !elements) {
-      throw new Error("Stripe not initialized.");
-    }
-
-    console.log("Total Amount (in cents):", total * 100);
-
-    // Get clientSecret from the backend
-    const response = await axiosInstance.post("/payment/create", {
-      total: total * 100,
-    });
-
-    const clientSecret = response.data?.clientSecret;
-    console.log("Received clientSecret:", clientSecret);
-
-    if (!clientSecret) {
-      throw new Error("Failed to get clientSecret.");
-    }
-
-    const { error, paymentIntent } = await stripe.confirmCardPayment(
-      clientSecret,
-      {
-        payment_method: {
-          card: elements.getElement(CardElement),
-        },
+      if (!stripe || !elements) {
+        throw new Error("Stripe not initialized.");
       }
-    );
 
-    if (error) {
-      console.error("Error during payment confirmation:", error);
-      throw new Error(error.message);
+      // Get clientSecret from the backend
+      const response = await axiosInstance.post("/payment/create", {
+        total: total * 100, // Total in cents
+      });
+
+      const clientSecret = response.data?.clientSecret;
+
+      if (!clientSecret) {
+        throw new Error("Failed to get clientSecret.");
+      }
+
+      const { error, paymentIntent } = await stripe.confirmCardPayment(
+        clientSecret,
+        {
+          payment_method: {
+            card: elements.getElement(CardElement),
+          },
+        }
+      );
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      // Save order to Firebase
+      await saveOrderToFirebase(paymentIntent);
+
+      // Clear the basket and redirect to orders page
+      dispatch({ type: "EMPTY_BASKET" });
+      navigate("/orders");
+    } catch (err) {
+      setCardError(err.message || "Payment failed.");
+    } finally {
+      setProcessing(false);
     }
+  };
 
-    console.log("Payment Intent Confirmed:", paymentIntent);
+  const saveOrderToFirebase = async (paymentIntent) => {
+    if (!user) return;
 
-    dispatch({ type: "EMPTY_BASKET" });
-    navigate("/orders");
-  } catch (err) {
-    console.error("Payment Error:", err.message);
-    setCardError(err.message || "Payment failed.");
-  } finally {
-    setProcessing(false);
-  }
-};
+    const orderData = {
+      user: {
+        email: user.email,
+        uid: user.uid,
+      },
+      basket: basket.map((item) => ({
+        id: item.id,
+        title: item.title,
+        price: item.price,
+        amount: item.amount,
+      })),
+      total,
+      paymentIntentId: paymentIntent.id,
+      createdAt: serverTimestamp(),
+    };
 
+    try {
+      // Save order to Firestore
+      await setDoc(doc(db, "orders", paymentIntent.id), orderData);
+      console.log("Order successfully saved to Firebase.");
+    } catch (err) {
+      console.error("Error saving order to Firebase:", err);
+    }
+  };
 
   return (
     <LayOut>
-      {/* Header */}
       <div className={classes.payment__header}>
         Checkout ({totalItem}) items
       </div>
 
-      {/* Payment Section */}
       <section className={classes.payment}>
-        {/* Delivery Address */}
         <div className={classes.flex}>
           <h3>Delivery Address</h3>
           <div>
@@ -106,7 +122,6 @@ const handlePayment = async (e) => {
         </div>
         <hr />
 
-        {/* Review Items */}
         <div className={classes.flex}>
           <h3>Review items and delivery</h3>
           <div>
@@ -117,21 +132,15 @@ const handlePayment = async (e) => {
         </div>
         <hr />
 
-        {/* Payment Form */}
         <div className={classes.flex}>
           <h3>Payment methods</h3>
           <div className={classes.payment__card__container}>
             <div className={classes.payment__details}>
               <form onSubmit={handlePayment}>
-                {/* Error Message */}
                 {cardError && (
                   <small style={{ color: "red" }}>{cardError}</small>
                 )}
-
-                {/* Card Input */}
                 <CardElement onChange={handleChange} />
-
-                {/* Payment Details */}
                 <div className={classes.payment__price}>
                   <div>
                     <span style={{ display: "flex", gap: "10px" }}>
