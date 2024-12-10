@@ -8,8 +8,8 @@ import CurrencyFormat from "../../Components/CurrencyFormat/CurrencyFormat";
 import { axiosInstance } from "../../Api/axios";
 import { ClipLoader } from "react-spinners";
 import { useNavigate } from "react-router-dom";
-import { db } from "../../Utility/firebase";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../../Utility/firebase"; 
+import { doc, setDoc, serverTimestamp } from "firebase/firestore"; // Firestore methods
 
 function Payment() {
   const [{ user, basket }, dispatch] = useContext(DataContext);
@@ -86,6 +86,7 @@ function Payment() {
         uid: user.uid,
       },
       basket: basket.map((item) => ({
+        image: item.image,
         id: item.id,
         title: item.title,
         price: item.price,
@@ -97,8 +98,9 @@ function Payment() {
     };
 
     try {
-      // Save order to Firestore
-      await setDoc(doc(db, "orders", paymentIntent.id), orderData);
+      // Save order in the user's orders sub-collection
+      const userOrdersRef = doc(db, "users", user.uid, "orders", paymentIntent.id);
+      await setDoc(userOrdersRef, orderData);
       console.log("Order successfully saved to Firebase.");
     } catch (err) {
       console.error("Error saving order to Firebase:", err);
@@ -134,7 +136,7 @@ function Payment() {
 
         <div className={classes.flex}>
           <h3>Payment methods</h3>
-          <div className={classes.payment__card__container}>
+          <div className={classes.payment_card_container}>
             <div className={classes.payment__details}>
               <form onSubmit={handlePayment}>
                 {cardError && (
